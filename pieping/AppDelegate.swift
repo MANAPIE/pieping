@@ -8,6 +8,7 @@
 import Cocoa
 import Foundation
 import UniformTypeIdentifiers
+import ServiceManagement
 
 // 요청 설정을 위한 구조체
 struct RequestConfig: Codable {
@@ -90,6 +91,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     
     var menuUpdateTimer: Timer?
     
+    private let launchAtLoginKey = "LaunchAtLogin"
+    private var isLaunchAtLoginEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: launchAtLoginKey) }
+        set { UserDefaults.standard.set(newValue, forKey: launchAtLoginKey) }
+    }
+    
     struct UrlCheckResult {
         var success: Bool?
         var statusCode: Int?
@@ -117,6 +124,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         loadConfigurations()
     }
     
+    private func syncLoginItemState(enabled: Bool) {
+        if #available(macOS 13.0, *) {
+            let service = SMAppService.mainApp
+            do {
+                if enabled {
+                    try service.register()
+                } else {
+                    try service.unregister()
+                }
+            } catch {
+                addDebugLog("[오류] 로그인 시 자동 시작 설정 중 오류: \(error.localizedDescription)")
+            }
+        } else {
+            addDebugLog("[안내] 이 macOS 버전에서는 자동 시작 설정을 지원하지 않습니다.")
+        }
+    }
+    
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 앱이 종료되지 않도록 설정
         NSApp.setActivationPolicy(.accessory)
@@ -132,6 +156,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         addDebugLog("[정보] 설정된 타이머 개수: \(requestConfigs.count)개")
         
         setupMenu()
+        syncLoginItemState(enabled: isLaunchAtLoginEnabled)
         
         if !requestConfigs.isEmpty {
             addDebugLog("[타이머] 모든 URL 타이머를 시작합니다.")
@@ -217,6 +242,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         
         menu.addItem(NSMenuItem.separator())
         
+        let launchAtLoginItem = NSMenuItem(title: "로그인 시 자동 시작", action: #selector(menuItemClicked(_:)), keyEquivalent: "")
+        launchAtLoginItem.target = self
+        launchAtLoginItem.tag = -20
+        launchAtLoginItem.state = isLaunchAtLoginEnabled ? .on : .off
+        menu.addItem(launchAtLoginItem)
+        
         let quitItem = NSMenuItem(title: "종료", action: #selector(menuItemClicked(_:)), keyEquivalent: "q")
         quitItem.target = self
         quitItem.tag = -2 // 종료를 위한 특별한 태그
@@ -234,6 +265,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             showEditDialog()
         case -10: // 새 URL 추가
             showAddDialog()
+        case -20: // 로그인 시 자동 시작 토글
+            let newValue = !isLaunchAtLoginEnabled
+            isLaunchAtLoginEnabled = newValue
+            syncLoginItemState(enabled: newValue)
+            setupMenu()
         case -2: // 종료
             quitApp()
         case -1: // 모든 URL 호출
